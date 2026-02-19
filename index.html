@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Roguelike Tetris</title>
+    <style>
+        :root {
+            --bg-color: #1a1a20;
+            --accent-color: #ffd700;
+            --panel-bg: #2a2a33;
+        }
+        body {
+            background: var(--bg-color);
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-area {
+            display: flex;
+            margin-top: 10px;
+            gap: 10px;
+            width: 100%;
+            max-width: 400px;
+            justify-content: center;
+        }
+
+        #canvas-wrapper {
+            position: relative;
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            border: 2px solid #555;
+            background: #000;
+        }
+        canvas { display: block; }
+
+        /* UI Panel */
+        #ui-panel {
+            width: 120px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-size: 11px;
+        }
+        .stat-box {
+            padding: 5px; background: var(--panel-bg);
+            border: 1px solid #444; border-radius: 4px;
+        }
+        .bar-bg { width: 100%; background: #444; height: 6px; margin-top: 2px; }
+        .bar-fill { height: 100%; transition: width 0.1s linear; }
+        #hp-bar { background: #ff4444; }
+        #enemy-bar { background: #aa44ff; }
+        
+        .sub-stat { color: #aaa; font-size: 10px; display: flex; justify-content: space-between; }
+
+        #log {
+            flex-grow: 1; background: #000; border: 1px solid #444;
+            padding: 4px; font-size: 10px; overflow: hidden;
+            display: flex; flex-direction: column-reverse; opacity: 0.8;
+        }
+        .log-msg { margin: 1px 0; border-bottom: 1px dashed #333; }
+        .dmg { color: #ff5555; } .heal { color: #55ff55; } .crit { color: #ffd700; font-weight:bold; }
+
+        /* Overlay & Menus */
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            z-index: 10;
+        }
+        button.start-btn {
+            padding: 15px 40px; font-size: 20px; font-weight: bold;
+            background: var(--accent-color); border: none; border-radius: 8px;
+            color: #000; cursor: pointer; margin-top: 20px;
+            box-shadow: 0 4px 0 #b89b00;
+        }
+        button.start-btn:active { transform: translateY(4px); box-shadow: none; }
+
+        /* Skill Selection Menu */
+        #skill-menu {
+            display: none; flex-direction: column; align-items: center; width: 100%;
+        }
+        .skill-card {
+            width: 80%; background: #333; border: 2px solid #fff;
+            margin: 5px 0; padding: 10px; cursor: pointer;
+            text-align: left; transition: 0.1s;
+        }
+        .skill-card:active { background: #555; transform: scale(0.98); }
+        .skill-title { color: var(--accent-color); font-weight: bold; font-size: 14px; }
+        .skill-desc { font-size: 11px; color: #ddd; margin-top: 2px; }
+
+        /* Controls */
+        #controls-wrapper {
+            flex-grow: 1; width: 100%; max-width: 400px;
+            display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr;
+            gap: 8px; padding: 10px; box-sizing: border-box;
+            margin-bottom: constant(safe-area-inset-bottom);
+            margin-bottom: env(safe-area-inset-bottom);
+        }
+        .btn {
+            background: #333; border: 2px solid #555; border-radius: 12px;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 24px; color: #ddd; box-shadow: 0 4px 0 #111;
+        }
+        .btn:active, .btn.pressed {
+            transform: translateY(4px); box-shadow: 0 0 0 #111; background: #555;
+        }
+        #btn-hard { grid-column: 2; grid-row: 1; background: #553333; border-color: #774444; color: #ffaaaa; }
+        #btn-rot-l { grid-column: 1; grid-row: 1; }
+        #btn-rot-r { grid-column: 3; grid-row: 1; }
+        #btn-left { grid-column: 1; grid-row: 2; }
+        #btn-down { grid-column: 2; grid-row: 2; }
+        #btn-right { grid-column: 3; grid-row: 2; }
+
+    </style>
+</head>
+<body>
+
+<div id="game-area">
+    <div id="canvas-wrapper">
+        <canvas id="tetris" width="200" height="360"></canvas>
+        
+        <div id="overlay">
+            <div id="start-ui">
+                <h2 style="color:var(--accent-color); margin:0; text-align:center;">ROGUELIKE<br>TETRIS </h2>
+                <p style="font-size:12px; color:#aaa;">Clear lines to kill enemies.<br>Level up to get skills.</p>
+                <button id="btn-start" class="start-btn">START</button>
+            </div>
+            
+            <div id="game-over-ui" style="display:none; text-align:center;">
+                <h1 style="color:red; margin:10px;">YOU DIED</h1>
+                <p>Level: <span id="res-lvl"></span> | Score: <span id="res-scr"></span></p>
+                <button id="btn-retry" class="start-btn">RETRY</button>
+            </div>
+
+            <div id="skill-menu">
+                <h2 style="color:#fff; margin-bottom:10px;">LEVEL UP!</h2>
+                <div id="skill-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="ui-panel">
+        <div class="stat-box">
+            <div>HP: <b id="hp-val">100</b></div>
+            <div class="bar-bg"><div id="hp-bar" class="bar-fill"></div></div>
+            <div class="sub-stat"><span>DEF:</span><span id="def-val">0</span></div>
+            <div class="sub-stat"><span>VAMP:</span><span id="vamp-val">0</span></div>
+        </div>
+        <div class="stat-box">
+            <div>ATK: <b id="atk-val">10</b></div>
+            <div class="sub-stat"><span>CRIT:</span><span id="crit-val">0%</span></div>
+            <div>Score: <span id="score-val">0</span></div>
+        </div>
+        <div class="stat-box" style="margin-top:10px;">
+            <div style="color:var(--accent-color)">ENEMY Lv.<b id="lvl-val">1</b></div>
+            <div>HP: <b id="en-hp-val">50</b></div>
+            <div class="bar-bg"><div id="en-bar" class="bar-fill"></div></div>
+            <div style="font-size:10px; margin-top:2px;">Atk in: <b id="en-timer">5.0</b>s</div>
+        </div>
+        <div id="log"></div>
+    </div>
+</div>
+
+<div id="controls-wrapper">
+    <div class="btn" id="btn-rot-l">🔄L</div>
+    <div class="btn" id="btn-hard" style="font-weight:bold;">▲DROP</div>
+    <div class="btn" id="btn-rot-r">🔄R</div>
+    <div class="btn" id="btn-left">⬅️</div>
+    <div class="btn" id="btn-down">⬇️</div>
+    <div class="btn" id="btn-right">➡️</div>
+</div>
+
+<script>
+// --- Audio System ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let nextSfxTime = 0;
+const playSfx = (type) => {
+    const now = audioCtx.currentTime;
+    if (now < nextSfxTime) return;
+    nextSfxTime = now + 0.05;
+    if(audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        if (type === 'move') { osc.frequency.setValueAtTime(300, now); osc.type = 'triangle'; gain.gain.value = 0.05; osc.stop(now + 0.05); }
+        else if (type === 'drop') { osc.frequency.setValueAtTime(150, now); osc.type = 'square'; gain.gain.value = 0.1; osc.stop(now + 0.1); }
+        else if (type === 'lock') { osc.frequency.setValueAtTime(100, now); osc.type = 'sawtooth'; gain.gain.value = 0.1; osc.stop(now + 0.1); }
+        else if (type === 'clear') { osc.frequency.setValueAtTime(600, now); osc.frequency.exponentialRampToValueAtTime(1200, now + 0.1); gain.gain.value = 0.1; osc.stop(now + 0.2); }
+        else if (type === 'damage') { osc.frequency.setValueAtTime(100, now); osc.frequency.linearRampToValueAtTime(50, now + 0.2); osc.type = 'sawtooth'; gain.gain.value = 0.2; osc.stop(now + 0.3); }
+        else if (type === 'lvl') { osc.frequency.setValueAtTime(400, now); osc.frequency.linearRampToValueAtTime(800, now + 0.3); osc.type = 'sine'; gain.gain.value = 0.1; osc.stop(now + 0.4); }
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start();
+    } catch(e) {}
+};
+
+// --- Game State ---
+const canvas = document.getElementById('tetris');
+const ctx = canvas.getContext('2d');
+const SCALE = 20;
+ctx.scale(SCALE, SCALE);
+
+const COLORS = [null, '#FF0D72', '#0DC2FF', '#0DFF72', '#F538FF', '#FF8E0D', '#FFE138', '#3877FF'];
+const SHAPES = 'ILJOTSZ';
+
+let arena = createMatrix(10, 18);
+let player = { 
+    pos: {x:0, y:0}, matrix: null, score:0, 
+    hp:100, maxHp:100, atk:10, 
+    def:0, crit:0, vamp:0 // New Stats
+};
+let enemy = { hp:50, maxHp:50, level:1, timer:0, interval:5000 };
+
+let lastTime = 0;
+let dropCounter = 0;
+let dropInterval = 1000;
+let gameState = 'START'; // START, PLAY, SKILL, GAMEOVER
+let inputState = { left: false, right: false, down: false };
+let inputTimers = { left: 0, right: 0, down: 0 };
+
+// --- Skill System ---
+const SKILLS = [
+    { id:'atk1', name:'STR UP', desc:'ATK +3', apply: p => { p.atk += 3; } },
+    { id:'atk2', name:'STR UP II', desc:'ATK +5', apply: p => { p.atk += 5; } },
+    { id:'hp1', name:'MAX HP UP', desc:'MaxHP +20 & Heal', apply: p => { p.maxHp += 20; p.hp += 20; } },
+    { id:'heal', name:'POTION', desc:'Heal 50% HP', apply: p => { p.hp = Math.min(p.maxHp, p.hp + Math.floor(p.maxHp*0.5)); } },
+    { id:'def', name:'IRON SKIN', desc:'DEF +1 (Reduce Dmg)', apply: p => { p.def += 1; } },
+    { id:'crit', name:'LUCKY HIT', desc:'CRIT Chance +10%', apply: p => { p.crit += 0.1; } },
+    { id:'vamp', name:'VAMPIRISM', desc:'Heal 2 HP per Line', apply: p => { p.vamp += 2; } },
+];
+
+function getRandomSkills() {
+    const pool = [...SKILLS];
+    const result = [];
+    for(let i=0; i<3; i++) {
+        if(pool.length === 0) break;
+        const idx = Math.floor(Math.random() * pool.length);
+        result.push(pool[idx]);
+        pool.splice(idx, 1);
+    }
+    return result;
+}
+
+// --- Core Functions ---
+function createMatrix(w, h) {
+    const matrix = [];
+    while (h--) matrix.push(new Array(w).fill(0));
+    return matrix;
+}
+
+function createPiece(type) {
+    if (type === 'I') return [[0, 1, 0, 0],[0, 1, 0, 0],[0, 1, 0, 0],[0, 1, 0, 0]];
+    if (type === 'L') return [[0, 2, 0],[0, 2, 0],[0, 2, 2]];
+    if (type === 'J') return [[0, 3, 0],[0, 3, 0],[3, 3, 0]];
+    if (type === 'O') return [[4, 4],[4, 4]];
+    if (type === 'Z') return [[5, 5, 0],[0, 5, 5],[0, 0, 0]];
+    if (type === 'S') return [[0, 6, 6],[6, 6, 0],[0, 0, 0]];
+    if (type === 'T') return [[0, 7, 0],[7, 7, 7],[0, 0, 0]];
+}
+
+function collide(arena, player) {
+    const [m, o] = [player.matrix, player.pos];
+    for (let y = 0; y < m.length; ++y) {
+        for (let x = 0; x < m[y].length; ++x) {
+            if (m[y][x] !== 0 && (arena[y + o.y] && arena[y + o.y][x + o.x]) !== 0) return true;
+        }
+    }
+    return false;
+}
+
+function draw() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawMatrix(arena, {x:0,y:0});
+    
+    if (player.matrix && gameState === 'PLAY') {
+        const ghostPos = {...player.pos};
+        while(!collide(arena, {matrix: player.matrix, pos: ghostPos})) ghostPos.y++;
+        ghostPos.y--;
+        ctx.globalAlpha = 0.2;
+        drawMatrix(player.matrix, ghostPos);
+        ctx.globalAlpha = 1.0;
+        drawMatrix(player.matrix, player.pos);
+    }
+}
+
+function drawMatrix(matrix, offset) {
+    matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) {
+                ctx.fillStyle = COLORS[value];
+                ctx.fillRect(x + offset.x, y + offset.y, 1, 1);
+                ctx.strokeStyle = 'white'; ctx.lineWidth = 0.05;
+                ctx.strokeRect(x + offset.x, y + offset.y, 1, 1);
+            }
+        });
+    });
+}
+
+function merge(arena, player) {
+    player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) arena[y + player.pos.y][x + player.pos.x] = value;
+        });
+    });
+}
+
+function rotate(matrix, dir) {
+    for (let y = 0; y < matrix.length; ++y) {
+        for (let x = 0; x < y; ++x) [matrix[x][y], matrix[y][x]] = [matrix[y][x], matrix[x][y]];
+    }
+    if (dir > 0) matrix.forEach(row => row.reverse()); else matrix.reverse();
+}
+
+function playerReset() {
+    const pieces = SHAPES;
+    player.matrix = createPiece(pieces[pieces.length * Math.random() | 0]);
+    player.pos.y = 0;
+    player.pos.x = (arena[0].length / 2 | 0) - (player.matrix[0].length / 2 | 0);
+    if (collide(arena, player)) {
+        gameState = 'GAMEOVER';
+        showGameOver();
+    }
+}
+
+let lockDelay = 0;
+function playerDrop() {
+    player.pos.y++;
+    if (collide(arena, player)) {
+        player.pos.y--; 
+        if (lockDelay > 500) {
+            merge(arena, player);
+            playSfx('lock');
+            arenaSweep();
+            if(gameState === 'PLAY') playerReset(); // Only reset if still playing (not lvl up)
+            lockDelay = 0;
+        }
+        return true; 
+    }
+    lockDelay = 0; dropCounter = 0;
+    return false;
+}
+
+function playerHardDrop() {
+    while(!collide(arena, player)) player.pos.y++;
+    player.pos.y--; 
+    merge(arena, player);
+    playSfx('drop');
+    arenaSweep();
+    if(gameState === 'PLAY') playerReset();
+    lockDelay = 0;
+}
+
+function playerMove(dir) {
+    player.pos.x += dir;
+    if (collide(arena, player)) player.pos.x -= dir;
+    else { playSfx('move'); lockDelay = 0; }
+}
+
+function playerRotate(dir) {
+    const pos = player.pos.x;
+    let offset = 1;
+    rotate(player.matrix, dir);
+    while (collide(arena, player)) {
+        player.pos.x += offset;
+        offset = -(offset + (offset > 0 ? 1 : -1));
+        if (offset > player.matrix[0].length) {
+            rotate(player.matrix, -dir);
+            player.pos.x = pos;
+            return;
+        }
+    }
+    playSfx('move');
+}
+
+// --- RPG Logic ---
+function arenaSweep() {
+    let rowCount = 0;
+    outer: for (let y = arena.length -1; y > 0; --y) {
+        for (let x = 0; x < arena[y].length; ++x) if (arena[y][x] === 0) continue outer;
+        const row = arena.splice(y, 1)[0].fill(0);
+        arena.unshift(row);
+        ++y;
+        rowCount++;
+    }
+    if (rowCount > 0) {
+        playSfx('clear');
+        
+        // Damage Calc
+        let isCrit = Math.random() < player.crit;
+        let dmg = Math.floor(player.atk * rowCount * (1 + (rowCount-1)*0.5));
+        if (isCrit) dmg *= 2;
+        
+        // Vampirism
+        if (player.vamp > 0) {
+            let heal = player.vamp * rowCount;
+            player.hp = Math.min(player.maxHp, player.hp + heal);
+            log(`Vampire: +${heal} HP`, 'heal');
+        }
+
+        player.score += dmg * 10;
+        enemy.hp -= dmg;
+        log(`${isCrit ? 'CRIT!' : 'Hit'} ${dmg} dmg`, isCrit ? 'crit' : 'dmg');
+        
+        if (enemy.hp <= 0) triggerLevelUp();
+        updateUI();
+    }
+}
+
+function triggerLevelUp() {
+    playSfx('lvl');
+    gameState = 'SKILL'; // Pause game
+    
+    // Show Skill Menu
+    const list = document.getElementById('skill-list');
+    list.innerHTML = '';
+    const choices = getRandomSkills();
+    
+    choices.forEach(skill => {
+        const btn = document.createElement('div');
+        btn.className = 'skill-card';
+        btn.innerHTML = `<div class="skill-title">${skill.name}</div><div class="skill-desc">${skill.desc}</div>`;
+        btn.onclick = () => selectSkill(skill);
+        list.appendChild(btn);
+    });
+
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('start-ui').style.display = 'none';
+    document.getElementById('skill-menu').style.display = 'flex';
+}
+
+function selectSkill(skill) {
+    skill.apply(player);
+    log(`Learned: ${skill.name}`, 'heal');
+    
+    // Reset Enemy
+    enemy.level++;
+    enemy.maxHp = Math.floor(enemy.maxHp * 1.3);
+    enemy.hp = enemy.maxHp;
+    dropInterval = Math.max(150, dropInterval - 40);
+    
+    // Resume Game
+    document.getElementById('skill-menu').style.display = 'none';
+    document.getElementById('overlay').style.display = 'none';
+    gameState = 'PLAY';
+    playerReset();
+    updateUI();
+}
+
+function enemyTurn(dt) {
+    enemy.timer += dt;
+    const nextAtk = Math.max(1500, enemy.interval - (enemy.level * 200));
+    
+    if (enemy.timer > nextAtk) {
+        let dmg = 5 + enemy.level;
+        // Defense check
+        dmg = Math.max(1, dmg - player.def);
+        
+        player.hp -= dmg;
+        playSfx('damage');
+        log(`Took ${dmg} dmg (Def:${player.def})`, 'dmg');
+        if (player.hp <= 0) { gameState = 'GAMEOVER'; showGameOver(); }
+        enemy.timer = 0;
+        updateUI();
+    }
+    document.getElementById('en-timer').innerText = ((nextAtk - enemy.timer)/1000).toFixed(1);
+}
+
+function log(msg, cls) {
+    const el = document.getElementById('log');
+    const line = document.createElement('div');
+    line.className = 'log-msg ' + (cls||'');
+    line.innerText = msg;
+    el.prepend(line);
+    if(el.children.length > 5) el.removeChild(el.lastChild);
+}
+
+function updateUI() {
+    document.getElementById('hp-val').innerText = player.hp;
+    document.getElementById('hp-bar').style.width = (player.hp/player.maxHp*100)+'%';
+    document.getElementById('en-hp-val').innerText = Math.max(0, enemy.hp);
+    document.getElementById('en-bar').style.width = (enemy.hp/enemy.maxHp*100)+'%';
+    document.getElementById('lvl-val').innerText = enemy.level;
+    document.getElementById('atk-val').innerText = player.atk;
+    document.getElementById('def-val').innerText = player.def;
+    document.getElementById('crit-val').innerText = Math.floor(player.crit*100)+'%';
+    document.getElementById('vamp-val').innerText = player.vamp;
+    document.getElementById('score-val').innerText = player.score;
+}
+
+function showGameOver() {
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('start-ui').style.display = 'none';
+    document.getElementById('skill-menu').style.display = 'none';
+    document.getElementById('game-over-ui').style.display = 'block';
+    document.getElementById('res-lvl').innerText = enemy.level;
+    document.getElementById('res-scr').innerText = player.score;
+}
+
+function startGame() {
+    arena.forEach(row => row.fill(0));
+    player = { pos: {x:0, y:0}, matrix: null, score:0, hp:100, maxHp:100, atk:10, def:0, crit:0, vamp:0 };
+    enemy = { hp:50, maxHp:50, level:1, timer:0, interval:5000 };
+    dropInterval = 1000;
+    
+    document.getElementById('overlay').style.display = 'none';
+    document.getElementById('log').innerHTML = '';
+    
+    gameState = 'PLAY';
+    playerReset();
+    updateUI();
+    lastTime = performance.now(); 
+    update();
+}
+
+function update(time = 0) {
+    if (gameState !== 'PLAY') {
+        if(gameState !== 'GAMEOVER') requestAnimationFrame(update); // Keep loop for resume
+        return;
+    }
+    
+    if (time === 0) time = performance.now();
+    const deltaTime = time - lastTime;
+    lastTime = time;
+
+    // --- Controls ---
+    const DAS_DELAY = 150; const DAS_SPEED = 50;  
+    if (inputState.left) {
+        if (inputTimers.left === 0) playerMove(-1);
+        inputTimers.left += deltaTime;
+        if (inputTimers.left > DAS_DELAY + DAS_SPEED) { playerMove(-1); inputTimers.left -= DAS_SPEED; }
+    } else inputTimers.left = 0;
+
+    if (inputState.right) {
+        if (inputTimers.right === 0) playerMove(1);
+        inputTimers.right += deltaTime;
+        if (inputTimers.right > DAS_DELAY + DAS_SPEED) { playerMove(1); inputTimers.right -= DAS_SPEED; }
+    } else inputTimers.right = 0;
+
+    if (inputState.down) {
+        if (inputTimers.down === 0) playerDrop();
+        inputTimers.down += deltaTime;
+        if (inputTimers.down > 50) { playerDrop(); inputTimers.down = 0; }
+    } else inputTimers.down = 0;
+
+    // --- Game Logic ---
+    dropCounter += deltaTime;
+    if (dropCounter > dropInterval) playerDrop();
+    
+    if (collide(arena, {...player, pos: {x: player.pos.x, y: player.pos.y + 1}})) lockDelay += deltaTime;
+
+    enemyTurn(deltaTime);
+    draw();
+    requestAnimationFrame(update);
+}
+
+// --- Bindings ---
+const bindTouch = (id, key) => {
+    const el = document.getElementById(id);
+    const setKey = (val) => {
+        if(gameState !== 'PLAY') return;
+        if (key === 'hard') { if(val) playerHardDrop(); }
+        else if (key === 'rotl') { if(val) playerRotate(-1); }
+        else if (key === 'rotr') { if(val) playerRotate(1); }
+        else { inputState[key] = val; }
+        if(val) el.classList.add('pressed'); else el.classList.remove('pressed');
+    };
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); setKey(true); });
+    el.addEventListener('touchend', (e) => { e.preventDefault(); setKey(false); });
+    el.addEventListener('mousedown', (e) => { e.preventDefault(); setKey(true); });
+    el.addEventListener('mouseup', (e) => { e.preventDefault(); setKey(false); });
+};
+bindTouch('btn-left', 'left'); bindTouch('btn-right', 'right'); bindTouch('btn-down', 'down');
+bindTouch('btn-hard', 'hard'); bindTouch('btn-rot-l', 'rotl'); bindTouch('btn-rot-r', 'rotr');
+
+document.addEventListener('keydown', e => {
+    if(e.repeat || gameState !== 'PLAY') return;
+    if(e.key === 'ArrowLeft') inputState.left = true;
+    if(e.key === 'ArrowRight') inputState.right = true;
+    if(e.key === 'ArrowDown') inputState.down = true;
+    if(e.key === 'ArrowUp') playerHardDrop();
+    if(e.key === 'z') playerRotate(-1);
+    if(e.key === 'x') playerRotate(1);
+});
+document.addEventListener('keyup', e => {
+    if(e.key === 'ArrowLeft') inputState.left = false;
+    if(e.key === 'ArrowRight') inputState.right = false;
+    if(e.key === 'ArrowDown') inputState.down = false;
+});
+
+document.getElementById('btn-start').addEventListener('click', startGame);
+document.getElementById('btn-retry').addEventListener('click', startGame);
+
+</script>
+</body>
+</html>
