@@ -275,6 +275,7 @@ if ('serviceWorker' in navigator) {
                 <div class="bar-bg"><div id="hp-bar" class="bar-fill"></div></div>
                 <div class="sub-stat"><span>DEF:</span><span id="def-val">0</span></div>
                 <div class="sub-stat"><span>VAMP:</span><span id="vamp-val">0</span></div>
+                <div class="sub-stat"><span>REG:</span><span id="reg-val">0</span></div>
             </div>
             <div class="stat-box">
                 <div>ATK: <b id="atk-val">10</b></div>
@@ -331,7 +332,7 @@ let arena = createMatrix(10, 18);
 let player = { 
     pos: {x:0, y:0}, matrix: null, score:0, 
     hp:100, maxHp:100, atk:10, 
-    def:0, crit:0, vamp:0 // New Stats
+    def:0, crit:0, vamp:0, greenHeal:1 // New Stats
 };
 let enemy = { hp:50, maxHp:50, level:1, timer:0, interval:5000 };
 
@@ -351,6 +352,7 @@ const SKILLS = [
     { id:'def', name:'IRON SKIN', desc:'DEF +1 (Reduce Dmg)', apply: p => { p.def += 1; } },
     { id:'crit', name:'LUCKY HIT', desc:'CRIT Chance +10%', apply: p => { p.crit += 0.1; } },
     { id:'vamp', name:'VAMPIRISM', desc:'Heal 2 HP per Line', apply: p => { p.vamp += 2; } },
+    { id:'green', name:'NATURE', desc:'Green Heal +2', apply: p => { p.greenHeal += 2; } },
 ];
 
 function getRandomSkills() {
@@ -500,8 +502,14 @@ function playerRotate(dir) {
 // --- RPG Logic ---
 function arenaSweep() {
     let rowCount = 0;
+    let greenBlocks = 0;
     outer: for (let y = arena.length -1; y > 0; --y) {
         for (let x = 0; x < arena[y].length; ++x) if (arena[y][x] === 0) continue outer;
+        
+        for (let x = 0; x < arena[y].length; ++x) {
+            if (arena[y][x] === 3) greenBlocks++;
+        }
+
         const row = arena.splice(y, 1)[0].fill(0);
         arena.unshift(row);
         ++y;
@@ -514,6 +522,13 @@ function arenaSweep() {
         let isCrit = Math.random() < player.crit;
         let dmg = Math.floor(player.atk * rowCount * (1 + (rowCount-1)*0.5));
         if (isCrit) dmg *= 2;
+        
+        // Nature Heal (Green Blocks)
+        if (greenBlocks > 0 && player.greenHeal > 0) {
+            let heal = greenBlocks * player.greenHeal;
+            player.hp = Math.min(player.maxHp, player.hp + heal);
+            log(`Nature: +${heal} HP`, 'heal');
+        }
         
         // Vampirism
         if (player.vamp > 0) {
@@ -655,6 +670,7 @@ function updateUI() {
     document.getElementById('def-val').innerText = player.def;
     document.getElementById('crit-val').innerText = Math.floor(player.crit*100)+'%';
     document.getElementById('vamp-val').innerText = player.vamp;
+    document.getElementById('reg-val').innerText = player.greenHeal;
     document.getElementById('score-val').innerText = player.score;
 }
 
@@ -669,7 +685,7 @@ function showGameOver() {
 
 function startGame() {
     arena.forEach(row => row.fill(0));
-    player = { pos: {x:0, y:0}, matrix: null, score:0, hp:100, maxHp:100, atk:10, def:0, crit:0, vamp:0 };
+    player = { pos: {x:0, y:0}, matrix: null, score:0, hp:100, maxHp:100, atk:10, def:0, crit:0, vamp:0, greenHeal:1 };
     enemy = { hp:50, maxHp:50, level:1, timer:0, interval:5000 };
     dropInterval = 1000;
     
